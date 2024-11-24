@@ -37,6 +37,7 @@ let rec string_of_tm (t:tm) : string =
 let () =
   assert((string_of_tm (Abs("f",Imp(Tvar "A",Tvar "B"),Abs("x",Tvar "A",App(Var "f",Var "x")))))="(λ (f : (A⇒ B)) -> (λ (x : A) -> (f x)))")
 
+
 (** typing inference*)
 type context = (var * ty) list
 
@@ -65,24 +66,73 @@ let () =
 let () =
   try
     let _ = (infer_type [("f",Tvar "A")] (Abs("f",Tvar "A", Var"x"))) in
-    assert (false) 
+    assert false
   with
   | Type_error -> ()
-  | _ -> assert (false) 
+  | _ -> assert false
 
 let () =
   try
     let _ = (infer_type [("f",Tvar "A");("x",Tvar "B")] (Abs("f",Tvar "A", Abs("x",Tvar "B",App(Var "f",Var "x"))))) in
-    assert (false) 
+    assert false
   with
   | Type_error -> ()
-  | _ -> assert (false) 
+  | _ -> assert false
 
 let () =
   try
     let _ = (infer_type [("f",Imp(Tvar "A",Tvar "B"));("x",Tvar "B")] (Abs("f",Imp(Tvar "A",Tvar "B"), Abs("x",Tvar "B",App(Var "f",Var "x"))))) in
-    assert (false) 
+    assert false
   with
   | Type_error -> ()
-  | _ -> assert (false) 
+  | _ -> assert false
 
+(** type checking *)
+let check_type (c:context) (tm:tm) (ty:ty) : unit =
+  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
+    else raise Type_error
+
+let () =
+  try (check_type [("x",Tvar "A")] (Abs("x",Tvar "A",Var "x")) (Imp(Tvar "A",Tvar "A"))) with
+  |Type_error -> assert false
+
+let () =
+  try (check_type [("x",Tvar "A")] (Abs("x",Tvar "A",Var "x")) (Imp(Tvar "B",Tvar "B"))) with
+  |Type_error -> ()
+  |_ -> assert false
+
+let () =
+  try (check_type [] (Var "x") (Tvar "A")) with
+  |Type_error -> ()
+  |_ -> assert false
+
+(** type inference and checking together *)
+(* 
+
+********************************************************
+to finish
+**********************************************************
+
+*)
+(*
+let rec infer_type (c:context) (t:tm) : ty = 
+  match t with
+    |Var(v) -> (
+      match c with
+       |[] -> raise Type_error
+       |(v',ty')::c' -> (
+        try (check_type [(v',ty')] v')
+       )
+        
+        if v'=v then ty' else infer_type c' (Var v)
+    )
+    |App(t',t'') -> (
+      match (infer_type c t') with
+        |Tvar v -> raise Type_error
+        |Imp(ty,ty') -> if ((infer_type c t'')=ty) then ty' else raise Type_error 
+    )
+    |Abs(v,ty,t') -> Imp(ty,infer_type c t')
+and check_type (c:context) (tm:tm) (ty:ty) : unit =
+  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
+    else raise Type_error
+*)
