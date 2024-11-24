@@ -1,6 +1,10 @@
 let () = Printexc.record_backtrace true
 
-(** ocamlopt prover.ml -o prover *) 
+(** ocamlopt prover.ml -o prover
+    ./prover
+    git commit . -m "Implemented the proof assistant."
+    git push
+*) 
 
 (** Type variables. *)
 type tvar = string
@@ -12,18 +16,21 @@ type var = string
 type ty =
   |Tvar of tvar
   |Imp of ty*ty
+  |Tcong of ty*ty
 
 (** lambda-terms *)
 type tm =
   |Var of var 
   |App of tm*tm
   |Abs of var*ty*tm
+  |And of tm*tm
 
 (** string representation *)
 let rec string_of_ty (t:ty) : string = 
   match t with
   |Tvar(v) -> v
   |Imp(t',t'') -> "("^(string_of_ty t')^"⇒ "^(string_of_ty t'')^")"
+  |Cong(t',t'') -> "("^(string_of_ty t')^"∧"^(string_of_ty t'')^")"
 
 let () =
   assert((string_of_ty (Imp(Imp(Tvar "A",Tvar "B"),Imp(Tvar "A",Tvar "C"))))="((A⇒ B)⇒ (A⇒ C))")
@@ -33,6 +40,7 @@ let rec string_of_tm (t:tm) : string =
   |Var(v) -> v
   |App(t',t'') -> "("^(string_of_tm t')^" "^(string_of_tm t'')^")"
   |Abs(v,ty,t') -> "(λ ("^v^" : "^(string_of_ty ty)^") -> "^(string_of_tm t')^")"
+  |And(t',t'') -> "("^(string_of_tm t')^"∧"^(string_of_tm t'')^")"
 
 let () =
   assert((string_of_tm (Abs("f",Imp(Tvar "A",Tvar "B"),Abs("x",Tvar "A",App(Var "f",Var "x")))))="(λ (f : (A⇒ B)) -> (λ (x : A) -> (f x)))")
@@ -43,12 +51,15 @@ type context = (var * ty) list
 
 exception Type_error
 
+
+(** seperated difinations of infer_type and type_checking *)
+(*
 let rec infer_type (c:context) (t:tm) : ty =
   match t with
     |Var(v) -> (
-      match c with
-       |[] -> raise Type_error
-       |(v',ty')::c' -> if v'=v then ty' else infer_type c' (Var v)
+      match List.assoc_opt v c with
+        |None -> raise Type_error
+        |Some b -> b
     )
     |App(t',t'') -> (
       match (infer_type c t') with
@@ -56,6 +67,36 @@ let rec infer_type (c:context) (t:tm) : ty =
         |Imp(ty,ty') -> if ((infer_type c t'')=ty) then ty' else raise Type_error 
     )
     |Abs(v,ty,t') -> Imp(ty,infer_type c t')
+
+(** type checking *)
+let check_type (c:context) (tm:tm) (ty:ty) : unit =
+  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
+    else raise Type_error
+*)
+
+
+(** type inference and checking together *)
+let rec infer_type (c:context) (t:tm) : ty =
+  match t with
+    |Var(v) -> (
+      match List.assoc_opt v c with
+        |None -> raise Type_error
+        |Some b -> b
+    )
+    |App(t',t'') -> (
+      match (infer_type c t') with
+        |Tvar v -> raise Type_error
+        |Imp(ty,ty') -> (
+          let () = check_type c t'' ty in ty'
+        )
+    )
+    |Abs(v,ty,t') -> Imp(ty,infer_type c t')
+    |And(t',t'') -> Cong(infer_type t',infer_type t'')
+and check_type (c:context) (tm:tm) (ty:ty) : unit =
+  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
+    else raise Type_error
+
+
 
 let () =
   let x = Imp(Imp(Tvar "A",Tvar "B"),Imp(Imp(Tvar "B",Tvar "C"),Imp(Tvar "A", Tvar "C"))) in
@@ -87,10 +128,6 @@ let () =
   | Type_error -> ()
   | _ -> assert false
 
-(** type checking *)
-let check_type (c:context) (tm:tm) (ty:ty) : unit =
-  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
-    else raise Type_error
 
 let () =
   try (check_type [("x",Tvar "A")] (Abs("x",Tvar "A",Var "x")) (Imp(Tvar "A",Tvar "A"))) with
@@ -106,33 +143,12 @@ let () =
   |Type_error -> ()
   |_ -> assert false
 
-(** type inference and checking together *)
-(* 
 
-********************************************************
-to finish
-**********************************************************
+(** other connectives *)
+(*????????????????????????
+what to do ????????????????????????*)
 
-*)
-(*
-let rec infer_type (c:context) (t:tm) : ty = 
-  match t with
-    |Var(v) -> (
-      match c with
-       |[] -> raise Type_error
-       |(v',ty')::c' -> (
-        try (check_type [(v',ty')] v')
-       )
-        
-        if v'=v then ty' else infer_type c' (Var v)
-    )
-    |App(t',t'') -> (
-      match (infer_type c t') with
-        |Tvar v -> raise Type_error
-        |Imp(ty,ty') -> if ((infer_type c t'')=ty) then ty' else raise Type_error 
-    )
-    |Abs(v,ty,t') -> Imp(ty,infer_type c t')
-and check_type (c:context) (tm:tm) (ty:ty) : unit =
-  if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
-    else raise Type_error
-*)
+
+
+
+
