@@ -19,6 +19,7 @@ type ty =
   |Cong of ty*ty
   |Ttrue
   |Disj of ty*ty
+  |Tfalse
 
 (** lambda-terms *)
 type tm =
@@ -32,6 +33,7 @@ type tm =
   |Left of tm*ty
   |Right of tm*ty
   |Match of tm*tm*tm
+  |Case of tm*ty
 
 
 (** string representation *)
@@ -42,6 +44,7 @@ let rec string_of_ty (t:ty) : string =
   |Cong(t',t'') -> "("^(string_of_ty t')^"∧"^(string_of_ty t'')^")"
   |Ttrue -> "⊤"
   |Disj(t',t'') -> "("^(string_of_ty t')^"∨"^(string_of_ty t'')^")"
+  |Tfalse -> "⊥ "
 
 let () =
   assert((string_of_ty (Arr(Arr(Tvar "A",Tvar "B"),Arr(Tvar "A",Tvar "C"))))="((A⇒ B)⇒ (A⇒ C))")
@@ -137,6 +140,11 @@ let rec infer_type (c:context) (t:tm) : ty =
         )
         |_ -> raise Type_error
     )
+    |Case(tm,ty) -> (
+      match (infer_type c tm) with
+        |Tfalse -> ty
+        |_ -> raise Type_error
+    )
 and check_type (c:context) (tm:tm) (ty:ty) : unit =
   if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
     else raise Type_error
@@ -207,3 +215,9 @@ let () =
 let () =
   let or_comm = Abs ("x",Disj(Tvar "A",Tvar "B"),Match(Var "x",Abs("y",Tvar "A",Right (Var "y",Tvar"B")),Abs("y",Tvar "B",Left (Var "y",Tvar"A")))) in
   print_endline ("or_comm : "^(string_of_ty (infer_type [] or_comm)))
+
+
+(** (A∧(A⇒⊥))⇒B *)  
+let () =
+  let non_contr = Abs ("x",Cong(Tvar "A",Arr(Tvar "A",Tfalse)),Case(App(Snd (Var "x"),Fst (Var "x")),Tvar "B")) in
+  print_endline ("non_contradiction : "^(string_of_ty (infer_type [] non_contr)))
