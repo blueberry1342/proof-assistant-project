@@ -40,7 +40,7 @@ let rec string_of_tm (t:tm) : string =
   |Var(v) -> v
   |App(t',t'') -> "("^(string_of_tm t')^" "^(string_of_tm t'')^")"
   |Abs(v,ty,t') -> "(λ ("^v^" : "^(string_of_ty ty)^") -> "^(string_of_tm t')^")"
-  |Pair(t',t'') -> "("^(string_of_tm t')^"∧"^(string_of_tm t'')^")"
+  |Pair(t',t'') -> "("^(string_of_tm t')^","^(string_of_tm t'')^")"
   |Fst(t') -> "(fst("^(string_of_tm t')^"))"
   |Snd(t') -> "(snd("^(string_of_tm t')^"))"
   |Unit -> "()"
@@ -262,10 +262,10 @@ let string_of_seq (s:sequent) : string =
     |(c,ty) -> (string_of_ctx c)^" |- "^(string_of_ty ty)
 
 (**  2.3 An interactive prover *)
-let rec prove env a =
+let rec prove file env a =
   print_endline (string_of_seq (env,a));
   print_string "? "; flush_all ();
-  let error e = print_endline e; prove env a in
+  let error e = print_endline e; prove file env a in
   let cmd, arg =
     let cmd = input_line stdin in
     let n = try String.index cmd ' ' with Not_found -> String.length cmd in
@@ -281,39 +281,96 @@ let rec prove env a =
        | Imp (a, b) ->
           if arg = "" then error "Please provide an argument for intro." else
             let x = arg in
-            let t = prove ((x,a)::env) b in
+            let _ = output_string file ("\n"^cmd^" "^arg) in
+            let t = prove file ((x,a)::env) b in
             Abs (x, a, t)
+        |And(fst,snd) -> 
+          if arg <> "" then error "Too much argument for intro." else
+            let _ = output_string file ("\n"^cmd^" "^arg) in
+            let t1 = prove file env fst in
+            let t2 = prove file env snd in
+            Pair(t1,t2)
+        |True -> 
+          if arg <> "" then error "Too much argument for intro." else
+            let _ = output_string file ("\n"^cmd^" "^arg) in
+            Unit  
        | _ ->
           error "Don't know how to introduce this."
      )
   | "exact" ->
      let t = tm_of_string arg in
      if infer_type env t <> a then error "Not the right type."
-     else t
-  |"elim" ->(
+     else let _ = output_string file ("\n"^cmd^" "^arg) in t
+  |"elim" -> (
+      if arg = "" then error "Please provide an argument for elim." else
+      let x = tm_of_string arg in
+      let ty = infer_type env x in
+      match ty with
+        |Imp(a',b') when b'=a -> 
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          let t = prove file env a' in App(x,t)
+        |_ -> error "Not the right type."
+  )
+  |"cut" -> (
+    if arg = "" then error "Please provide an argument for cut." else
+    let a' = ty_of_string arg in 
+    let _ = output_string file ("\n"^cmd^" "^arg) in
+    let t1 = prove file env (Imp(a',a)) in
+    let t2 = prove file env a' in
+    App(t1,t2)
+  )
+  |"fst" -> (
+    if arg = "" then error "Please provide an argument for fst." else
+    (
+      let t = tm_of_string arg in 
+      match infer_type env t with
+        |And(a',_) when a' = a -> let _ = output_string file ("\n"^cmd^" "^arg) in (Fst t)
+        |_ -> error "Not the right type."
+    )
+  )
+  |"snd" -> (
+    if arg = "" then error "Please provide an argument for snd." else
+    (
+      let t = tm_of_string arg in 
+      match infer_type env t with
+        |And(_,a') when a' = a -> let _ = output_string file ("\n"^cmd^" "^arg) in (Snd t)
+        |_ -> error "Not the right type."
+    )
+  )
+  |"left" -> (
+    if arg <> "" then error "Too much argument for left." else
     match a with
-     |TVar(b) -> (
-        if arg = "" then error "Please provide an argument for intro." else
-        let x = arg in
-        let ty = infer_type env (Var x) in
-        match ty with
-          |Imp(a',b') when b'=(TVar b) -> let t = prove env a' in App(Var x,t)
-          |_ -> error "Not the right type."
-      )
-      |_ ->
-        error "Don't know how to eliminate this."
+      |Or(a',b') ->
+        let _ = output_string file ("\n"^cmd^" "^arg) in 
+        let t = prove file env a' in
+        Left(t,b')
+      |_ -> error "Not the right type."
+  )
+  |"right" -> (
+    if arg <> "" then error "Too much argument for right." else
+    match a with
+      |Or(a',b') ->
+        let _ = output_string file ("\n"^cmd^" "^arg) in 
+        let t = prove file env b' in
+        Right(b',t)
+      |_ -> error "Not the right type."
   )
   | cmd -> error ("Unknown command: " ^ cmd)
          
 let () =
+  print_endline "FILE OUTPUTING MODE : Please enter the name of the file in which you want to save the proof:";
+  let b = input_line stdin in
+  let file = open_out (b^".proof") in
   print_endline "Please enter the formula to prove:";
   let a = input_line stdin in
+  let _ = output_string file a in
   let a = ty_of_string a in
   print_endline "Let's prove it.";
-  let t = prove [] a in
+  let t = prove file [] a in
   print_endline "done.";
   print_endline "Proof term is";
   print_endline (string_of_tm t);
   print_string  "Typechecking... "; flush_all ();
   assert (infer_type [] t = a);
-  print_endline "ok."
+  print_endline "ok.";
+  close_out file
