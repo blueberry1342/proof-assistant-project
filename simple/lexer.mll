@@ -6,6 +6,7 @@ open Parser
 let space = ' ' | '\t' | '\r'
 
 rule token = parse
+  | "Nat"    { NAT }
   | "not"    { NOT }
   | "¬"      { NOT }
   | "fun"    { FUN }

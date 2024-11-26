@@ -8,6 +8,7 @@ open Expr
 %token FST SND LEFT RIGHT ABSURD
 %token <string> IDENT
 %token EOF
+%token NAT
 
 %right IMP
 %right OR
@@ -30,6 +31,7 @@ ty:
   | TRUE         { True }
   | FALSE        { False }
   | LPAR ty RPAR { $2 }
+  | NAT          { Nat }
 
 /* A term */
 tm:
