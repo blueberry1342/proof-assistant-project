@@ -28,7 +28,7 @@ let rec string_of_ty (t:ty) : string =
   |TVar(v) -> v
   |Imp(t',t'') -> "("^(string_of_ty t')^"⇒ "^(string_of_ty t'')^")"
   |And(t',t'') -> "("^(string_of_ty t')^"∧"^(string_of_ty t'')^")"
-  |True -> "⊤"
+  |True -> "T"
   |Or(t',t'') -> "("^(string_of_ty t')^"∨"^(string_of_ty t'')^")"
   |False -> "⊥ "
 
@@ -309,6 +309,14 @@ let rec prove file env a =
         |Imp(a',b') when b'=a -> 
           let _ = output_string file ("\n"^cmd^" "^arg) in
           let t = prove file env a' in App(x,t)
+        |Or(a',b') ->
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          let t1 = prove file ((arg,a')::env) a in
+          let t2 = prove file ((arg,b')::env) a in
+          Case(x,arg,t1,arg,t2) 
+        |False -> 
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          Absurd(x,a)
         |_ -> error "Not the right type."
   )
   |"cut" -> (
@@ -352,7 +360,7 @@ let rec prove file env a =
       |Or(a',b') ->
         let _ = output_string file ("\n"^cmd^" "^arg) in 
         let t = prove file env b' in
-        Right(b',t)
+        Right(a',t)
       |_ -> error "Not the right type."
   )
   | cmd -> error ("Unknown command: " ^ cmd)
