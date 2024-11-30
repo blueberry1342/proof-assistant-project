@@ -31,6 +31,7 @@ let rec string_of_ty (t:ty) : string =
   |True -> "T"
   |Or(t',t'') -> "("^(string_of_ty t')^"∨"^(string_of_ty t'')^")"
   |False -> "⊥ "
+  |Nat -> "N"
 
 let () =
   assert((string_of_ty (Imp(Imp(TVar "A",TVar "B"),Imp(TVar "A",TVar "C"))))="((A⇒ B)⇒ (A⇒ C))")
@@ -48,6 +49,9 @@ let rec string_of_tm (t:tm) : string =
   |Left(tm,ty) -> "left("^(string_of_tm tm)^","^(string_of_ty ty)^")"
   |Right(ty,tm) -> "left("^(string_of_ty ty)^","^(string_of_tm tm)^")"
   |Absurd(tm,ty) -> "absurd("^(string_of_tm tm)^","^(string_of_ty ty)^")"
+  |Zero -> "0"
+  |Suc(t) -> "suc ("^(string_of_tm t)^")"
+  |Rec(t1,t2,v1,v2,t3) -> "rec ("^(string_of_tm t1)^","^(string_of_tm t2)^","^v1^v2^"->"^(string_of_tm t3)^")"
 
 let () =
   assert((string_of_tm (Abs("f",Imp(TVar "A",TVar "B"),Abs("x",TVar "A",App(Var "f",Var "x")))))="(λ (f : (A⇒ B)) -> (λ (x : A) -> (f x)))")
@@ -126,6 +130,12 @@ let rec infer_type (c:context) (t:tm) : ty =
         |False -> ty
         |_ -> raise Type_error
     )
+    |Zero -> Nat
+    |Suc(tm) -> let () = check_type c tm Nat in Nat
+    |Rec(n,z,v1,v2,s) ->
+      let () = check_type c n Nat in
+      let ty = infer_type c z in 
+      let () = check_type ((v1,Nat)::(v2,ty)::c) s ty in ty
 and check_type (c:context) (tm:tm) (ty:ty) : unit =
   if ((string_of_ty (infer_type c tm))=string_of_ty ty) then ()
     else raise Type_error
@@ -294,6 +304,15 @@ let rec prove file env a =
           if arg <> "" then error "Too much argument for intro." else
             let _ = output_string file ("\n"^cmd^" "^arg) in
             Unit  
+        |Nat when arg = "" -> let _ = output_string file ("\n"^cmd^" "^arg) in Zero
+        |Nat when arg <> "" ->
+          let t = prove file env Nat in
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          Suc t(*
+          let x = tm_of_string arg in
+          let () = check_type env x Nat in 
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          Suc x*)
        | _ ->
           error "Don't know how to introduce this."
      )
@@ -317,6 +336,14 @@ let rec prove file env a =
         |False -> 
           let _ = output_string file ("\n"^cmd^" "^arg) in
           Absurd(x,a)
+        |Nat -> (
+          let _ = output_string file ("case zero :") in
+          let t2 = prove file env a in
+          let _ = output_string file ("case non-zero : ") in
+          let t3 = prove file (("rec1",Nat)::("rec2",a)::env) a in
+          let _ = output_string file ("\n"^cmd^" "^arg) in
+          Rec(x,t2,"rec1","rec2",t3)
+        )
         |_ -> error "Not the right type."
   )
   |"cut" -> (

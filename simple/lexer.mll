@@ -7,6 +7,9 @@ let space = ' ' | '\t' | '\r'
 
 rule token = parse
   | "Nat"    { NAT }
+  | "Zero"   { ZERO }
+  | "Suc"    { SUC }
+  | "Rec"    { REC }
   | "not"    { NOT }
   | "¬"      { NOT }
   | "fun"    { FUN }

@@ -9,6 +9,9 @@ open Expr
 %token <string> IDENT
 %token EOF
 %token NAT
+%token ZERO
+%token SUC
+%token REC
 
 %right IMP
 %right OR
@@ -39,6 +42,7 @@ tm:
   | FUN LPAR IDENT COLON ty RPAR TO tm     { Abs ($3, $5, $8) }
   | CASE tm OF IDENT TO tm BAR IDENT TO tm { Case ($2, $4, $6, $8, $10) }
 
+
 /* An application */
 atm:
   | stm     { $1 }
@@ -55,3 +59,6 @@ stm:
   | LEFT LPAR tm COMMA ty RPAR   { Left ($3, $5) }
   | RIGHT LPAR ty COMMA tm RPAR  { Right ($3, $5) }
   | ABSURD LPAR tm COMMA ty RPAR { Absurd ($3, $5) }
+  | ZERO                         { Zero }
+  | SUC tm                       { Suc $2 }
+  | REC LPAR tm COMMA tm COMMA IDENT COMMA IDENT COMMA tm RPAR { Rec ($3,$5,$7,$9,$11) }
