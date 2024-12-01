@@ -4,15 +4,22 @@ open Expr
 
 let of_string s = Parser.expr Lexer.token (Lexing.from_string s)
 
+(** 
+dune exec ./prover.exe
+*)
 
 (** 5.2 String representation *)
 let rec to_string (e:expr) : string =
   match e with
-  |Type -> "Set"
-  |Var(v) -> v
+  |Type -> "Type"
+  |Var v -> v
   |App(e1,e2) -> "("^(to_string e1)^" "^(to_string e2)^")" 
-  |Abs(v,e1,e2) -> "(λ ("^v^" : "^(to_string e1)^") -> "^(to_string e2)^")"
-  |Pi(x,a,b) -> "Π ("^x^":"^(to_string a)^") -> "^(to_string b)
+  |Abs(v,e1,e2) -> "(fun ("^v^" : "^(to_string e1)^") -> "^(to_string e2)^")"
+  |Pi(x,a,b) -> "(("^x^" : "^(to_string a)^") -> "^(to_string b)^")"
+  |Nat -> "Nat"
+  |Z -> "Z"
+  |S n -> "(S "^to_string n^")"
+  |Ind(p,z,s,n) -> "Ind "^(to_string p)^" "^(to_string z)^" "^(to_string s)^" "^(to_string n)
   |_ -> assert false
 
 
@@ -26,17 +33,15 @@ let fresh_var () : var =
     )
 
 
-(** 5.4 Substitution *)
+(**
 let rec has_fv (v:var) (t:expr) :bool =
   match t with
     |Var(v') -> if (v=v') then true else false
     |App(t1,t2) -> (has_fv v t1)||(has_fv v t2)
     |Abs(v',_,t') -> if (v=v') then false else (has_fv v t')
-    |Type -> assert false
-    |Pi(_,_,_) -> assert false
+    |Type -> false
+    |Pi(v',_,b) -> if (v=v') then false else (has_fv v b)
     |_ -> assert false
-
-(** ??? *)
 let rec subst (v:var) (e1:expr) (e2:expr) = 
   match e2 with
     |Type -> Type 
@@ -61,6 +66,33 @@ let rec subst (v:var) (e1:expr) (e2:expr) =
         else Pi(v',subst v e1 a,subst v e1 b)
       ) 
     |_ -> assert false
+*)
+
+
+(** 5.4 Substitution *)
+let rec subst (v:var) (e1:expr) (e2:expr) = 
+  match e2 with
+    |Type -> Type 
+    |Var v' -> if v = v' then e1 else e2
+    |App(a,b) -> App(subst v e1 a, subst v e1 b)
+    |Abs(v',a,b) -> 
+      if v'=v then e2
+      else (
+          let v'' = fresh_var() in
+          Abs(v'',subst v e1 a,subst v e1 (subst v' (Var(v'')) b))
+      )
+    |Pi(v',a,b) -> 
+      if v'=v then e2
+      else (
+          let v'' = fresh_var() in
+          Pi(v'',subst v e1 a,subst v e1 (subst v' (Var(v'')) b))
+      ) 
+    |Nat -> Nat
+    |Z -> Z
+    |_ -> assert false
+(*problem : number of fresh var*)
+
+
 
 (** 5.5 Contexts *)
 
@@ -71,8 +103,8 @@ let rec string_of_context (c:context) : string =
     |[] -> ""
     |(var,(ty,e))::c' when c'<>[] -> (
       match e with
-        |None -> (string_of_context c')^" , "^var^" : "^(to_string ty)
-        |Some e' -> (string_of_context c')^" , "^var^" : "^(to_string ty)^"="^(to_string e')
+        |None -> (string_of_context c')^"\n"^var^" : "^(to_string ty)
+        |Some e' -> (string_of_context c')^"\n"^var^" : "^(to_string ty)^"="^(to_string e')
     )
     |(var,(ty,e))::_ -> (
       match e with
@@ -99,16 +131,12 @@ let rec beta_reduction (c:context) (t:expr) : expr option =
       )
     )
    |Abs(v,ty,t') -> (
-    match (beta_reduction c t') with
-      |None -> (
-        match (beta_reduction c ty) with
-          |None -> None
-          |Some ty' -> Some (Abs(v,ty',t'))
-      )
-      |Some t'' -> (
-        match (beta_reduction c ty) with
-          |None -> Some (Abs(v,ty,t''))
-          |Some ty' -> Some (Abs(v,ty',t''))
+    match beta_reduction c ty with
+      |Some ty' -> Some (Abs(v,ty',t'))
+      |None ->(
+        match beta_reduction c t' with
+        |Some t'' -> Some (Abs(v,ty,t''))
+        |None -> None
       )
    )
    |App(t1,t2) -> (
@@ -136,6 +164,20 @@ let rec beta_reduction (c:context) (t:expr) : expr option =
           |None -> Some (Abs(v',a',b))
           |Some b' -> Some (Pi(v',a',b'))
       )
+   )
+   |Type -> None
+   |Nat -> None
+   |Z -> None
+   |S n -> (
+    match beta_reduction c n with
+     |None -> None
+     |Some m -> Some (S m)
+   )
+   |Ind(p,z,s,n) -> (
+    match n with
+     |Z -> Some z
+     |S m -> Some (App(App(s,m),Ind(p,z,s,m)))
+     |_ -> assert false
    )
    |_ -> assert false
 
@@ -178,6 +220,26 @@ let rec alpha (e1:expr) (e2:expr) :bool =
           |Type -> true
           |_ -> false
     )
+    |Nat -> (
+      match e2 with
+        |Nat -> true
+        |_ -> false
+    )
+    |Z -> (
+      match e2 with
+        |Z -> true
+        |_ -> false
+    )
+    |S n -> (
+      match e2 with
+        |S m -> alpha m n
+        |_ -> false
+    )
+    |Ind(p,z,s,n) -> (
+      match e2 with
+        |Ind(p',z',s',n') -> (alpha p p')&&(alpha z z')&&(alpha s s')&&(alpha n n')
+        |_ -> false
+    )
     |_ -> assert false
 
 (** 5.8 Conversion *)
@@ -186,6 +248,16 @@ let conv (c:context) (e1:expr) (e2:expr) : bool =
 
 (** 5.9 Type inference *)
 exception Type_error of string
+
+
+(**
+e' : (id ((_ : Bool) -> Bool)) = app id ...
+infer e' 
+
+*)
+
+
+(** define pred = fun (n : Nat) -> Ind (fun (n : Nat) -> Nat) Z (fun (n : Nat) -> (fun (m : Nat) -> m)) *)
 
 let rec infer (c:context) (e:expr) : expr =
   match e with
@@ -199,13 +271,27 @@ let rec infer (c:context) (e:expr) : expr =
       match (infer c e') with
         |Pi(v,a,b) -> (
           match (infer c e'') with
-            |ty when (conv c ty a) -> subst v e' b
+            |ty when (conv c ty a) -> subst v e'' b
             |_ -> raise (Type_error "Can not do such an application, because the second term has the wrong type.")
         )
         |_ -> raise (Type_error "Can not do such an application because the first term isn't a function.")
     )
     |Pi(_,_,_) -> Type
     |Type -> Type
+    |Nat -> Type
+    |Z -> Nat
+    |S n -> if conv c n Nat then Nat else raise (Type_error "Succesor doesn't make sense.")
+    |Ind(p,z,s,n) -> (
+      let ty1 = infer c z in 
+      let ty2 = infer c s in
+      let ty3 = App(p,Z) in
+      if conv c ty1 ty3 then
+        match ty2 with
+          |Pi(v,a,b) when conv c a Nat -> 
+            if conv ((v,(Nat,None))::c) (infer ((v,(Nat,None))::c) b) (Pi("",App(p,Var v),App(p,(S (Var v))))) then App(p,n) else raise (Type_error "induction function 1")
+          |_ -> raise (Type_error "induction function 2")
+      else  raise (Type_error "Wrong init condition")
+    )
     |_ -> assert false
 
 (** 5.10 Type checking *)
