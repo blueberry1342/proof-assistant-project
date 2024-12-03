@@ -6,6 +6,8 @@ let of_string s = Parser.expr Lexer.token (Lexing.from_string s)
 
 (** 
 dune exec ./prover.exe
+cat NAME.proof | dune exec ./prover.exe
+define pred = fun (n : Nat) -> Ind (fun (n : Nat) -> Nat) Z (fun (n : Nat) -> (fun (m : Nat) -> n)) n
 *)
 
 (** 5.2 String representation *)
@@ -20,7 +22,9 @@ let rec to_string (e:expr) : string =
   |Z -> "Z"
   |S n -> "(S "^to_string n^")"
   |Ind(p,z,s,n) -> "Ind "^(to_string p)^" "^(to_string z)^" "^(to_string s)^" "^(to_string n)
-  |_ -> assert false
+  |Eq(t,u) -> (to_string t)^" = "^(to_string u)
+  |Refl x -> "Refl "^(to_string x)
+  |J(p,r,x,y,e) -> "J "^(to_string p)^" "^(to_string r)^" "^(to_string x)^" "^(to_string y)^" "^(to_string e)
 
 
 (** 5.3 Fresh variable names *)
@@ -89,7 +93,11 @@ let rec subst (v:var) (e1:expr) (e2:expr) =
       ) 
     |Nat -> Nat
     |Z -> Z
-    |_ -> assert false
+    |S n -> S (subst v e1 n)
+    |Ind(p,z,s,n) -> Ind(subst v e1 p,subst v e1 z,subst v e1 s,subst v e1 n)
+    |Eq(u,t) -> Eq(subst v e1 u,subst v e1 t)
+    |Refl t -> Refl (subst v e1 t)
+    |J(p,r,x,y,e) -> J(subst v e1 p,subst v e1 r,subst v e1 x,subst v e1 y,subst v e1 e)
 (*problem : number of fresh var*)
 
 
@@ -174,12 +182,30 @@ let rec beta_reduction (c:context) (t:expr) : expr option =
      |Some m -> Some (S m)
    )
    |Ind(p,z,s,n) -> (
-    match n with
-     |Z -> Some z
-     |S m -> Some (App(App(s,m),Ind(p,z,s,m)))
-     |_ -> assert false
+    match beta_reduction c n with 
+      |Some n' -> Some (Ind(p,z,s,n'))
+      |None -> (
+        match n with
+          |Z -> Some z
+          |S m -> Some (App(App(s,m),Ind(p,z,s,m)))
+          |_ -> None
+      )
    )
-   |_ -> assert false
+   |Eq(t,u) ->(
+    match beta_reduction c t with
+      |Some t' -> Some (Eq(t',u))
+      |None -> (
+        match beta_reduction c u with
+          |Some u' -> Some (Eq(t,u'))
+          |None -> None
+      )
+   )
+   |Refl e -> (
+    match beta_reduction c e with
+      |Some e' -> Some (Refl e')
+      |None -> None
+   )
+   |J(p,r,x,y,e) -> Some (App(App(App(App(p,r),x),y),e))
 
 let rec normalize (c:context) (e:expr) : expr =
   match beta_reduction c e with 
@@ -240,7 +266,22 @@ let rec alpha (e1:expr) (e2:expr) :bool =
         |Ind(p',z',s',n') -> (alpha p p')&&(alpha z z')&&(alpha s s')&&(alpha n n')
         |_ -> false
     )
-    |_ -> assert false
+    |Eq(t,u) -> (
+      match e2 with 
+        |Eq(t',u') -> (alpha t t')&&(alpha u u')
+        |_ -> false
+    )
+    |Refl e -> (
+      match e2 with
+        |Refl e' -> alpha e e'
+        |_ -> false
+    )
+    |J(p,r,x,y,e) ->(
+      match e2 with 
+        |J(p',r',x',y',e') -> (alpha p p')&&(alpha r r')&&(alpha x x')&&(alpha y y')&&(alpha e e')
+        |_ -> false
+    )
+
 
 (** 5.8 Conversion *)
 let conv (c:context) (e1:expr) (e2:expr) : bool =
@@ -264,14 +305,14 @@ let rec infer (c:context) (e:expr) : expr =
     |Var v -> (
       match List.assoc_opt v c with
         |None -> raise (Type_error ("Type of variable "^v^" not found."))
-        |Some (ty,_)-> ty
+        |Some (ty,_)-> normalize c ty
     )
-    |Abs(v,ty,e') -> Pi(v,ty,infer ((v,(ty,None))::c) e')
+    |Abs(v,ty,e') -> normalize c (Pi(v,ty,infer ((v,(ty,None))::c) e'))
     |App(e',e'') -> (
       match (infer c e') with
         |Pi(v,a,b) -> (
           match (infer c e'') with
-            |ty when (conv c ty a) -> subst v e'' b
+            |ty when (conv c ty a) -> normalize c (subst v e'' b)
             |_ -> raise (Type_error "Can not do such an application, because the second term has the wrong type.")
         )
         |_ -> raise (Type_error "Can not do such an application because the first term isn't a function.")
@@ -280,7 +321,7 @@ let rec infer (c:context) (e:expr) : expr =
     |Type -> Type
     |Nat -> Type
     |Z -> Nat
-    |S n -> if conv c n Nat then Nat else raise (Type_error "Succesor doesn't make sense.")
+    |S n -> if conv c (infer c n) Nat then Nat else raise (Type_error "Succesor doesn't make sense.")
     |Ind(p,z,s,n) -> (
       let ty1 = infer c z in 
       let ty2 = infer c s in
@@ -288,11 +329,25 @@ let rec infer (c:context) (e:expr) : expr =
       if conv c ty1 ty3 then
         match ty2 with
           |Pi(v,a,b) when conv c a Nat -> 
-            if conv ((v,(Nat,None))::c) (infer ((v,(Nat,None))::c) b) (Pi("",App(p,Var v),App(p,(S (Var v))))) then App(p,n) else raise (Type_error "induction function 1")
-          |_ -> raise (Type_error "induction function 2")
-      else  raise (Type_error "Wrong init condition")
+            if conv ((v,(Nat,None))::c) b (Pi("",App(p,Var v),App(p,(S (Var v))))) then normalize c (App(p,n)) 
+            else raise (Type_error ("Type of the result of s : "^(to_string (normalize c b))^" doesn't match with "^(to_string (normalize c (Pi("",App(p,Var v),App(p,(S (Var v)))))))))
+          |_ -> raise  (Type_error "induction function 2")
+      else  raise (Type_error ("Type of the init condition : "^(to_string (normalize c ty1))^" doesn't match with "^(to_string (normalize c ty3))))
     )
-    |_ -> assert false
+    |Eq(_,_) -> Type
+    |Refl t -> Eq(t,t)
+    |J(p,r,x,y,e) ->
+      let a = (infer c x) in
+      let b = (infer c y) in
+      if conv c a b then 
+        if conv c (infer c p) (Pi("x",a,Pi("y",a,Pi("",Eq(Var "x",Var "y"),Type)))) then
+          if conv c (infer c r) (Pi("x",a,App(App(App(p,Var "x"),Var "x"),Refl (Var "x")))) then
+            if conv c (infer c e) (Eq(x,y)) then
+              normalize c (App(App(App(p,x),y),e))
+            else raise (Type_error ((to_string e)^" : "^(to_string (infer c e))^" doesn't have the right type "^(to_string (normalize c (Eq(x,y))))))
+          else raise (Type_error ((to_string r)^" : "^(to_string (infer c r))^" doesn't have the right type "^(to_string (normalize c (Pi("x",a,App(App(App(p,Var "x"),Var "x"),Refl (Var "x"))))))))
+        else raise (Type_error ((to_string p)^" : "^(to_string (infer c p))^" doesn't have the right type "^(to_string (normalize c (Pi("x",a,Pi("y",a,Pi("",Eq(x,y),Type))))))))
+      else raise (Type_error ("x : "^(to_string x)^" and y : "^(to_string y)^" don't have the same type "^(to_string (normalize c (Pi("x",a,Pi("y",a,Pi("",Eq(Var "x",Var "y"),Type))))))))
 
 (** 5.10 Type checking *)
 let check (c:context) (e:expr) (ty:expr) : unit =
@@ -302,7 +357,7 @@ let check (c:context) (e:expr) (ty:expr) : unit =
 let () =
   let env = ref [] in
   let loop = ref true in
-  let file = open_out "interactive.proof" in
+  let file = open_out "dnat.proof" in
   let split c s =
     try
       let n = String.index s c in
@@ -358,3 +413,35 @@ let () =
     | Parsing.Parse_error -> print_endline ("Parsing error.")
   done;
   print_endline "Bye." 
+
+(**
+define pred = fun (n : Nat) -> Ind (fun (n : Nat) -> Nat) Z (fun (n : Nat) -> (fun (m : Nat) -> n)) n
+eval pred Z
+eval pred (S (S (S Z)))
+define add = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (n : Nat) -> Nat) m (fun (n : Nat) -> fun (m : Nat) -> S m) n
+eval add (S (S (S Z))) (S (S Z))
+*)
+(*
+define Seq = fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (z : x = y) -> S x = S y) (fun (x : Nat) -> Refl (S x)) x y e
+define addz = fun (n : Nat) -> Ind (fun (m : Nat) -> (add m Z = m)) (Refl Z) (fun (m : Nat) -> fun (e : add m Z = m) -> Seq (add m Z) m e) n
+define zadd = fun (n : Nat) -> Refl n
+define addasso = fun (n : Nat) -> fun (m : Nat) -> fun (p : Nat) -> Ind (fun (n : Nat) -> add (add n m) p = add n (add m p)) (Refl (add m p)) (fun (n : Nat) -> fun (e : add (add n m) p = add n (add m p)) -> Seq (add (add n m) p) (add n (add m p)) e) n
+check addasso = Pi (n : Nat) -> Pi (m : Nat) -> Pi (p : Nat) -> add (add n m) p = add n (add m p)
+define addcomm = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (k : Nat) -> add m k = add k m) (addz m) (fun (l : Nat) -> fun (e : add m l = add l m) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y)) () ) n
+Seq (add m l) (add l m) e    
+
+((e : Ind (fun (x691 : Nat) -> Nat) n (fun (x688 : Nat) -> (fun (x690 : Nat) -> (S x690))) m = Ind (fun (x717 : Nat) -> Nat) m (fun (x714 : Nat) -> (fun (x716 : Nat) -> (S x716))) n) -> (S Ind (fun (x695 : Nat) -> Nat) n (fun (x692 : Nat) -> (fun (x694 : Nat) -> (S x694))) m) = (S Ind (fun (x721 : Nat) -> Nat) m (fun (x718 : Nat) -> (fun (x720 : Nat) -> (S x720))) n)) doesn't match with 
+(( : Ind (fun (x854 : Nat) -> Nat) n (fun (x851 : Nat) -> (fun (x853 : Nat) -> (S x853))) m = Ind (fun (x880 : Nat) -> Nat) m (fun (x877 : Nat) -> (fun (x879 : Nat) -> (S x879))) n) -> Ind (fun (x858 : Nat) -> Nat) (S n) (fun (x855 : Nat) -> (fun (x857 : Nat) -> (S x857))) m = (S Ind (fun (x884 : Nat) -> Nat) m (fun (x881 : Nat) -> (fun (x883 : Nat) -> (S x883))) n)).
+
+(( : Ind (fun ( : Nat) -> Nat) l (fun ( : Nat) -> (fun ( : Nat) -> (S x))) m = Ind (fun (x1005 : Nat) -> Nat) m (fun ( : Nat) -> (fun ( : Nat) -> (S x))) l) -> (S Ind (fun (x983 : Nat) -> Nat) l (fun (x980 : Nat) -> (fun (x982 : Nat) -> (S x982))) m) = (S Ind (fun (x1009 : Nat) -> Nat) m (fun (x1006 : Nat) -> (fun (x1008 : Nat) -> (S x1008))) l)) doesn't match with
+(( : Ind (fun ( : Nat) -> Nat) l (fun ( : Nat) -> (fun ( : Nat) -> (S x))) m = Ind (fun (x1168 : Nat) -> Nat) m (fun ( : Nat) -> (fun ( : Nat) -> (S x))) l) -> Ind (fun (x1146 : Nat) -> Nat) (S l) (fun (x1143 : Nat) -> (fun (x1145 : Nat) -> (S x1145))) m = (S Ind (fun (x1172 : Nat) -> Nat) m (fun (x1169 : Nat) -> (fun (x1171 : Nat) -> (S x1171))) l)).
+?
+
+*) 
+(*
+define addsuc = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (n : Nat) -> add n (S m) = add (S n) m) (Refl (S m)) (fun (n : Nat) -> fun (e : add n (S m) = add (S n) m) -> Seq (add n (S m)) (add (S n) m) e) n
+define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> J 
+define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> Ind (fun (n : Nat) -> n = l) (Refl Z) (fun (n : Nat) -> fun (e : n = l) -> Seq n l e) n
+define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y) -> x = l) (fun (x : Nat) -> e2) n m e1
+*)(** one should be much easier to define than the other ?*)
+
