@@ -129,15 +129,7 @@ let rec find_value (c:context) (v:var) : expr option =
 
 let rec beta_reduction (c:context) (t:expr) : expr option =
   match t with
-   |Var(v) -> (
-    match (find_value c v) with
-      |None -> None
-      |Some e -> (
-        match beta_reduction c e with
-          |None -> Some e
-          |Some e' -> Some e'
-      )
-    )
+   |Var(v) -> find_value c v
    |Abs(v,ty,t') -> (
     match beta_reduction c ty with
       |Some ty' -> Some (Abs(v,ty',t'))
@@ -167,11 +159,7 @@ let rec beta_reduction (c:context) (t:expr) : expr option =
           |None -> None
           |Some b' -> Some (Pi(v',a,b'))
       )
-      |Some a' -> (
-        match (beta_reduction c b) with
-          |None -> Some (Abs(v',a',b))
-          |Some b' -> Some (Pi(v',a',b'))
-      )
+      |Some a' -> Some (Pi(v',a',b))
    )
    |Type -> None
    |Nat -> None
@@ -205,7 +193,28 @@ let rec beta_reduction (c:context) (t:expr) : expr option =
       |Some e' -> Some (Refl e')
       |None -> None
    )
-   |J(p,r,x,y,e) -> Some (App(App(App(App(p,r),x),y),e))
+   |J(p,r,x,y,e) -> (
+    if (x = y) then Some (App(r,x))
+    else match (beta_reduction c p) with
+      |Some p' -> Some (J(p',r,x,y,e))
+      |None -> (
+        match beta_reduction c r with
+          |Some r' -> Some (J(p,r',x,y,e))
+          |None -> (
+            match beta_reduction c x with
+            |Some x' -> Some (J(p,r,x',y,e))
+            |None -> (
+              match beta_reduction c y with
+              |Some y' -> Some (J(p,r,x,y',e))
+              |None -> (
+                match beta_reduction c e with
+                |Some e' -> Some (J(p,r,x,y,e'))
+                |None -> None
+              )
+            )
+          )
+      )
+   )
 
 let rec normalize (c:context) (e:expr) : expr =
   match beta_reduction c e with 
@@ -313,7 +322,7 @@ let rec infer (c:context) (e:expr) : expr =
         |Pi(v,a,b) -> (
           match (infer c e'') with
             |ty when (conv c ty a) -> normalize c (subst v e'' b)
-            |_ -> raise (Type_error "Can not do such an application, because the second term has the wrong type.")
+            |_ -> raise (Type_error ("Can not do such an application for "^(to_string e')^", because the second term has the wrong type :\n"^(to_string e'')^" has the type "^(to_string (normalize c (infer c (e''))))^"\n we want "^(to_string (normalize c a))))
         )
         |_ -> raise (Type_error "Can not do such an application because the first term isn't a function.")
     )
@@ -330,7 +339,7 @@ let rec infer (c:context) (e:expr) : expr =
         match ty2 with
           |Pi(v,a,b) when conv c a Nat -> 
             if conv ((v,(Nat,None))::c) b (Pi("",App(p,Var v),App(p,(S (Var v))))) then normalize c (App(p,n)) 
-            else raise (Type_error ("Type of the result of s : "^(to_string (normalize c b))^" doesn't match with "^(to_string (normalize c (Pi("",App(p,Var v),App(p,(S (Var v)))))))))
+            else raise (Type_error ("Type of the result of s : "^(to_string b)^" doesn't match with "^(to_string (Pi("",App(p,Var v),App(p,(S (Var v))))))))
           |_ -> raise  (Type_error "induction function 2")
       else  raise (Type_error ("Type of the init condition : "^(to_string (normalize c ty1))^" doesn't match with "^(to_string (normalize c ty3))))
     )
@@ -357,7 +366,7 @@ let check (c:context) (e:expr) (ty:expr) : unit =
 let () =
   let env = ref [] in
   let loop = ref true in
-  let file = open_out "dnat.proof" in
+  let file = open_out "interactive.proof" in
   let split c s =
     try
       let n = String.index s c in
@@ -427,7 +436,7 @@ define addz = fun (n : Nat) -> Ind (fun (m : Nat) -> (add m Z = m)) (Refl Z) (fu
 define zadd = fun (n : Nat) -> Refl n
 define addasso = fun (n : Nat) -> fun (m : Nat) -> fun (p : Nat) -> Ind (fun (n : Nat) -> add (add n m) p = add n (add m p)) (Refl (add m p)) (fun (n : Nat) -> fun (e : add (add n m) p = add n (add m p)) -> Seq (add (add n m) p) (add n (add m p)) e) n
 check addasso = Pi (n : Nat) -> Pi (m : Nat) -> Pi (p : Nat) -> add (add n m) p = add n (add m p)
-define addcomm = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (k : Nat) -> add m k = add k m) (addz m) (fun (l : Nat) -> fun (e : add m l = add l m) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y)) () ) n
+define addcomm = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (k : Nat) -> add m k = add k m) (addz m) (fun (l : Nat) -> fun (e : add m l = add l m) -> trans (add m (S l)) (add (S m) l) (addsuc m l) (add (S l) m) (Seq (add m l) (add l m) e)) n
 Seq (add m l) (add l m) e    
 
 ((e : Ind (fun (x691 : Nat) -> Nat) n (fun (x688 : Nat) -> (fun (x690 : Nat) -> (S x690))) m = Ind (fun (x717 : Nat) -> Nat) m (fun (x714 : Nat) -> (fun (x716 : Nat) -> (S x716))) n) -> (S Ind (fun (x695 : Nat) -> Nat) n (fun (x692 : Nat) -> (fun (x694 : Nat) -> (S x694))) m) = (S Ind (fun (x721 : Nat) -> Nat) m (fun (x718 : Nat) -> (fun (x720 : Nat) -> (S x720))) n)) doesn't match with 
@@ -441,7 +450,59 @@ Seq (add m l) (add l m) e
 (*
 define addsuc = fun (n : Nat) -> fun (m : Nat) -> Ind (fun (n : Nat) -> add n (S m) = add (S n) m) (Refl (S m)) (fun (n : Nat) -> fun (e : add n (S m) = add (S n) m) -> Seq (add n (S m)) (add (S n) m) e) n
 define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> J 
-define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> Ind (fun (n : Nat) -> n = l) (Refl Z) (fun (n : Nat) -> fun (e : n = l) -> Seq n l e) n
+define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> Ind (fun (x : Nat) -> fun (y : Nat) -> fun (e3 : x = y) -> y = l) (fun (x : Nat) -> e2) n m e1
 define trans = fun (n : Nat) -> fun (m : Nat) -> fun (l : Nat) -> fun (e1 : n = m) -> fun (e2 : m = l) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y) -> x = l) (fun (x : Nat) -> e2) n m e1
-*)(** one should be much easier to define than the other ?*)
 
+
+
+define trans = fun (n : Nat) -> fun (m : Nat) -> fun (e1 : n = m) -> J (fun (x : Nat) -> fun (y : Nat) -> fun (e : x = y) -> (l : Nat) -> (e2 : y = l) -> x = l) (fun (j : Nat) -> fun (k : Nat) -> fun (e3 : j = k) -> e3) n m e1
+*)(** one should be much easier to define than the other ?*)
+(*
+define addz = fun (n : Nat) -> Ind (fun (m : Nat) -> (add m Z = m)) (Refl Z) (fun (m : Nat) -> fun (e : add m Z = m) -> Seq (add m Z) m e) n
+(fun (e : Ind (fun (x99 : Nat) -> Nat) Z (fun (x96 : Nat) -> (fun (x98 : Nat) -> (S x98))) m = m) -> (S Ind (fun (x86 : Nat) -> Nat) Z (fun (x83 : Nat) -> (fun (x85 : Nat) -> (S x85))) m) = (S m)) doesn't match with 
+(( : Ind (fun (x161 : Nat) -> Nat) Z (fun (x158 : Nat) -> (fun (x160 : Nat) -> (S x160))) m = m) -> (S Ind (fun (x165 : Nat) -> Nat) Z (fun (x162 : Nat) -> (fun (x164 : Nat) -> (S x164))) m) = (S m)).
+
+(fun (e : Ind (fun (x99 : Nat) -> Nat) Z (fun (x96 : Nat) -> (fun (x98 : Nat) -> (S x98))) m = m) -> (S Ind (fun (x86 : Nat) -> Nat) Z (fun (x83 : Nat) -> (fun (x85 : Nat) -> (S x85))) m) = (S m)) 
+(( : Ind (fun (x161 : Nat) -> Nat) Z (fun (x158 : Nat) -> (fun (x160 : Nat) -> (S x160))) m = m) -> (S Ind (fun (x165 : Nat) -> Nat) Z (fun (x162 : Nat) -> (fun (x164 : Nat) -> (S x164))) m) = (S m)).
+ *)
+
+(*
+
+define dist = 
+fun (n : Nat) -> 
+fun (m : Nat) -> 
+fun (p : Nat) -> 
+Ind 
+(fun (n : Nat) -> mult (add n m) p = add (mult n p) (mult m p)) 
+(Refl (mult m p)) 
+(
+fun (n : Nat) -> 
+fun (e : mult (add n m) p = add (mult n p) (mult m p)) -> 
+trans 
+(mult (add (S n) m) p) 
+(add p (add (mult n p) (mult m p))) 
+(addcong (mult (add n m) p) (add (mult n p) (mult m p)) p e) 
+(add (mult (S n) p) (mult m p)) 
+(
+sym 
+(add (mult (S n) p) (mult m p)) 
+(add p (add (mult n p) (mult m p))) 
+(addasso p (mult n p) (mult m p))
+)
+) 
+n
+*)
+(*
+trans 
+((mult ((add (S n)) m)) p)
+((add p) ((add ((mult n) p)) ((mult m) p)))
+
+
+((((addcong ((mult ((add n) m)) p)) ((add ((mult n) p)) ((mult m) p))) p) e).
+
+
+Ind (fun (x2514 : Nat) -> Nat) ((mult ((add n) m)) p) (fun (x2511 : Nat) -> (fun (x2513 : Nat) -> (S x2513))) p = Ind (fun (x2510 : Nat) -> Nat) ((add ((mult n) p)) ((mult m) p)) (fun (x2507 : Nat) -> (fun (x2509 : Nat) -> (S x2509))) p
+Ind (fun (x1903 : Nat) -> Nat) Ind (fun (x1902 : Nat) -> Nat) Z (fun (x1899 : Nat) -> (fun (x1901 : Nat) -> ((add p) x1901))) Ind (fun (x1898 : Nat) -> Nat) m (fun (x1895 : Nat) -> (fun (x1897 : Nat) -> (S x1897))) n (fun (x1892 : Nat) -> (fun (x1894 : Nat) -> (S x1894))) p = Ind (fun (x1925 : Nat) -> Nat) ((add ((mult n) p)) ((mult m) p)) (fun (x1922 : Nat) -> (fun (x1924 : Nat) -> (S x1924))) p.
+
+Typing error :Can not do such an application for ((trans ((mult ((add (S n)) m)) p)) ((add p) ((add ((mult n) p)) ((mult m) p)))), because the second term has the wrong type :
+((((addcong ((mult ((add n) m)) p)) ((add ((mult n) p)) ((mult m) p))) p) e) has the type Ind (fun (x2514 : Nat) -> Nat) ((mult ((add n) m)) p) (fun (x2511 : Nat) -> (fun (x2513 : Nat) -> (S x2513))) p = Ind (fun (x2510 : Nat) -> Nat) ((add ((mult n) p)) ((mult m) p)) (fun (x2507 : Nat) -> (fun (x2509 : Nat) -> (S x2509))) p*)

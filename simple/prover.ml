@@ -304,8 +304,8 @@ let rec prove file env a =
           if arg <> "" then error "Too much argument for intro." else
             let _ = output_string file ("\n"^cmd^" "^arg) in
             Unit  
-        |Nat when arg = "" -> let _ = output_string file ("\n"^cmd^" "^arg) in Zero
-        |Nat when arg <> "" ->
+        |Nat when arg = "zero" -> let _ = output_string file ("\n"^cmd^" "^arg) in Zero
+        |Nat when arg = "suc" ->
           let t = prove file env Nat in
           let _ = output_string file ("\n"^cmd^" "^arg) in
           Suc t(*
@@ -337,11 +337,11 @@ let rec prove file env a =
           let _ = output_string file ("\n"^cmd^" "^arg) in
           Absurd(x,a)
         |Nat -> (
-          let _ = output_string file ("case zero :") in
-          let t2 = prove file env a in
-          let _ = output_string file ("case non-zero : ") in
-          let t3 = prove file (("rec1",Nat)::("rec2",a)::env) a in
           let _ = output_string file ("\n"^cmd^" "^arg) in
+          let _ = print_endline ("case zero :") in
+          let t2 = prove file env a in
+          let _ = print_endline ("case non-zero : ") in
+          let t3 = prove file (("rec1",Nat)::("rec2",a)::env) a in
           Rec(x,t2,"rec1","rec2",t3)
         )
         |_ -> error "Not the right type."
@@ -393,8 +393,9 @@ let rec prove file env a =
   | cmd -> error ("Unknown command: " ^ cmd)
          
 let () =
-  print_endline "FILE OUTPUTING MODE : Please enter the name of the file in which you want to save the proof:";
-  let b = input_line stdin in
+  (*print_endline "FILE OUTPUTING MODE : Please enter the name of the file in which you want to save the proof:";
+  let b = input_line stdin in*)
+  let b = "interactive" in
   let file = open_out (b^".proof") in
   print_endline "Please enter the formula to prove:";
   let a = input_line stdin in
