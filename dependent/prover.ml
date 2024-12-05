@@ -324,7 +324,7 @@ let rec infer (c:context) (e:expr) : expr =
             |ty when (conv c ty a) -> normalize c (subst v e'' b)
             |_ -> raise (Type_error ("Can not do such an application for "^(to_string e')^", because the second term has the wrong type :\n"^(to_string e'')^" has the type "^(to_string (normalize c (infer c (e''))))^"\n we want "^(to_string (normalize c a))))
         )
-        |_ -> raise (Type_error "Can not do such an application because the first term isn't a function.")
+        |_ -> raise (Type_error ("Can not do such an application because the first "^(to_string e')^" term isn't a function."))
     )
     |Pi(_,_,_) -> Type
     |Type -> Type
@@ -349,8 +349,11 @@ let rec infer (c:context) (e:expr) : expr =
       let a = (infer c x) in
       let b = (infer c y) in
       if conv c a b then 
-        if conv c (infer c p) (Pi("x",a,Pi("y",a,Pi("",Eq(Var "x",Var "y"),Type)))) then
-          if conv c (infer c r) (Pi("x",a,App(App(App(p,Var "x"),Var "x"),Refl (Var "x")))) then
+        let fv1 = fresh_var () in
+        let fv2 = fresh_var () in
+        if conv c (infer c p) (Pi(fv1,a,Pi(fv2,a,Pi("",Eq(Var fv1,Var fv2),Type)))) then
+          let fv3 = fresh_var () in
+          if conv c (infer c r) (Pi(fv3,a,App(App(App(p,Var fv3),Var fv3),Refl (Var fv3)))) then
             if conv c (infer c e) (Eq(x,y)) then
               normalize c (App(App(App(p,x),y),e))
             else raise (Type_error ((to_string e)^" : "^(to_string (infer c e))^" doesn't have the right type "^(to_string (normalize c (Eq(x,y))))))
